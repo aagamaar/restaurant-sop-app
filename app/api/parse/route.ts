@@ -1,8 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import pdfParse from "pdf-parse";
+import PDFParser from "pdf2json";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+
+function extractTextFromPDF(buffer: Buffer): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const pdfParser = new PDFParser(null, true);
+
+    pdfParser.on("pdfParser_dataError", (errData: { parserError: Error }) => {
+      reject(errData.parserError);
+    });
+
+    pdfParser.on("pdfParser_dataReady", () => {
+      const text = (
+        pdfParser as unknown as { getRawTextContent: () => string }
+      ).getRawTextContent();
+      resolve(text);
+    });
+
+    pdfParser.parseBuffer(buffer);
+  });
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -13,11 +32,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No file provided" }, { status: 400 });
     }
 
-    // Convert the uploaded file into raw text
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
-    const pdfData = await pdfParse(buffer);
-    const pdfText = pdfData.text;
+
+    const pdfText = await extractTextFromPDF(buffer);
 
     if (!pdfText || pdfText.trim().length < 20) {
       return NextResponse.json(
@@ -29,8 +47,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Ask Gemini to extract tasks
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
 
     const prompt = `You are converting a restaurant Standard Operating Procedure document into a structured checklist of executable tasks.
 
@@ -53,7 +70,6 @@ ${pdfText.slice(0, 15000)}`;
     const result = await model.generateContent(prompt);
     const responseText = result.response.text();
 
-    // Clean up the response — sometimes Gemini wraps JSON in code fences
     const cleanedText = responseText
       .replace(/```json\n?/g, "")
       .replace(/```\n?/g, "")
@@ -62,7 +78,7 @@ ${pdfText.slice(0, 15000)}`;
     let tasks;
     try {
       tasks = JSON.parse(cleanedText);
-    } catch (parseError) {
+    } catch {
       console.error("Failed to parse Gemini response:", cleanedText);
       return NextResponse.json(
         { error: "AI response was not valid JSON. Try again." },
