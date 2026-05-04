@@ -35,66 +35,153 @@ export default function UploadPage() {
     }
 
     setIsUploading(true);
-    setStatus("Saving checklist...");
 
     try {
-      const shareCode = generateShareCode();
-      const title = file.name.replace(/\.pdf$/i, "");
+      // Step 1: send PDF to our parse API
+      setStatus("Reading your PDF...");
+      const formData = new FormData();
+      formData.append("file", file);
 
-      const { data, error } = await supabase
-        .from("checklists")
-        .insert({
-          title: title,
-          share_code: shareCode,
-        })
-        .select()
-        .single();
+      const parseResponse = await fetch("/api/parse", {
+        method: "POST",
+        body: formData,
+      });
 
-      if (error) {
-        console.error("Supabase error:", error);
-        setStatus(`Error: ${error.message}`);
+      if (!parseResponse.ok) {
+        const err = await parseResponse.json();
+        setStatus(`Error: ${err.error ?? "Failed to parse PDF"}`);
         setIsUploading(false);
         return;
       }
 
-      console.log("Checklist created:", data);
+      const { tasks } = await parseResponse.json();
+
+      // Step 2: create the checklist
+      setStatus(`Found ${tasks.length} tasks. Saving checklist...`);
+      const shareCode = generateShareCode();
+      const title = file.name.replace(/\.pdf$/i, "");
+
+      const { data: checklist, error: checklistError } = await supabase
+        .from("checklists")
+        .insert({ title, share_code: shareCode })
+        .select()
+        .single();
+
+      if (checklistError || !checklist) {
+        setStatus(`Error saving checklist: ${checklistError?.message}`);
+        setIsUploading(false);
+        return;
+      }
+
+      // Step 3: save all the tasks
+      const tasksToInsert = tasks.map(
+        (t: {
+          title: string;
+          frequency: string;
+          section: string;
+          order_index: number;
+        }) => ({
+          checklist_id: checklist.id,
+          title: t.title,
+          frequency: t.frequency,
+          section: t.section,
+          order_index: t.order_index,
+        }),
+      );
+
+      const { error: tasksError } = await supabase
+        .from("tasks")
+        .insert(tasksToInsert);
+
+      if (tasksError) {
+        setStatus(`Error saving tasks: ${tasksError.message}`);
+        setIsUploading(false);
+        return;
+      }
+
+      // Step 4: redirect to the share link page
       router.push(`/c/${shareCode}`);
     } catch (err) {
-      console.error("Unexpected error:", err);
+      console.error("Upload error:", err);
       setStatus("Something went wrong. Check the console.");
       setIsUploading(false);
     }
   };
 
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center p-8 bg-white">
-      <div className="max-w-xl w-full">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">
+    <main
+      style={{
+        minHeight: "100vh",
+        padding: "32px",
+        backgroundColor: "#ffffff",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <div style={{ maxWidth: "600px", width: "100%" }}>
+        <h1
+          style={{
+            fontSize: "30px",
+            fontWeight: "bold",
+            color: "#111827",
+            marginBottom: "8px",
+          }}
+        >
           Upload your SOP
         </h1>
-        <p className="text-gray-600 mb-8">
-          Drop in your existing SOP PDF. We&apos;ll turn it into a checklist.
+        <p style={{ color: "#6b7280", marginBottom: "32px" }}>
+          Drop in your existing SOP PDF. We&apos;ll turn it into a checklist
+          using AI.
         </p>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
+        <form onSubmit={handleSubmit}>
+          <div
+            style={{
+              border: "2px dashed #d1d5db",
+              borderRadius: "8px",
+              padding: "32px",
+              textAlign: "center",
+              marginBottom: "16px",
+            }}
+          >
             <input
               type="file"
               accept="application/pdf"
               onChange={handleFileChange}
               disabled={isUploading}
-              className="block mx-auto text-sm text-gray-700"
+              style={{ display: "block", margin: "0 auto", fontSize: "14px" }}
             />
           </div>
 
-          {status && <p className="text-sm text-gray-600">{status}</p>}
+          {status && (
+            <p
+              style={{
+                fontSize: "14px",
+                color: "#6b7280",
+                marginBottom: "16px",
+              }}
+            >
+              {status}
+            </p>
+          )}
 
           <button
             type="submit"
             disabled={isUploading || !file}
-            className="w-full bg-gray-900 text-white py-3 px-4 rounded-lg font-medium hover:bg-gray-800 transition disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{
+              width: "100%",
+              backgroundColor: isUploading || !file ? "#9ca3af" : "#111827",
+              color: "#ffffff",
+              padding: "12px 16px",
+              borderRadius: "8px",
+              fontWeight: 500,
+              border: "none",
+              cursor: isUploading || !file ? "not-allowed" : "pointer",
+              fontSize: "16px",
+            }}
           >
-            {isUploading ? "Saving..." : "Upload PDF"}
+            {isUploading ? "Processing..." : "Upload PDF"}
           </button>
         </form>
       </div>

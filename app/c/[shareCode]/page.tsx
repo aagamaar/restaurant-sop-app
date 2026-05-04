@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import TaskList from "./TaskList";
 
 export default async function ChecklistPage({
   params,
@@ -7,20 +8,35 @@ export default async function ChecklistPage({
 }) {
   const { shareCode } = await params;
 
-  const { data: checklist, error } = await supabase
+  const { data: checklist, error: checklistError } = await supabase
     .from("checklists")
     .select("*")
     .eq("share_code", shareCode)
     .single();
 
-  if (error || !checklist) {
+  if (checklistError || !checklist) {
     return (
-      <main className="min-h-screen flex flex-col items-center justify-center p-8 bg-white">
-        <div className="max-w-xl w-full text-center">
-          <h1 className="text-3xl font-bold text-gray-900 mb-4">
+      <main
+        style={{
+          minHeight: "100vh",
+          padding: "24px",
+          backgroundColor: "#ffffff",
+        }}
+      >
+        <div
+          style={{ maxWidth: "600px", margin: "0 auto", textAlign: "center" }}
+        >
+          <h1
+            style={{
+              fontSize: "28px",
+              fontWeight: "bold",
+              color: "#111827",
+              marginBottom: "16px",
+            }}
+          >
             Checklist not found
           </h1>
-          <p className="text-gray-600">
+          <p style={{ color: "#6b7280" }}>
             We couldn&apos;t find a checklist with code {shareCode}.
           </p>
         </div>
@@ -28,29 +44,55 @@ export default async function ChecklistPage({
     );
   }
 
+  const { data: tasks } = await supabase
+    .from("tasks")
+    .select("*")
+    .eq("checklist_id", checklist.id)
+    .order("order_index", { ascending: true });
+
+  const today = new Date().toISOString().slice(0, 10);
+  const taskIds = tasks?.map((t) => t.id) ?? [];
+  const { data: completions } = await supabase
+    .from("completions")
+    .select("*")
+    .in("task_id", taskIds)
+    .gte("ticked_at", `${today}T00:00:00`)
+    .lte("ticked_at", `${today}T23:59:59`);
+
+  const completedTaskIds = completions?.map((c) => c.task_id) ?? [];
+
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center p-8 bg-white">
-      <div className="max-w-xl w-full">
-        <div className="mb-8 text-center">
-          <div className="text-green-600 text-5xl mb-4">✓</div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">
-            Checklist created
+    <main
+      style={{
+        minHeight: "100vh",
+        padding: "24px",
+        backgroundColor: "#ffffff",
+      }}
+    >
+      <div style={{ maxWidth: "600px", margin: "0 auto" }}>
+        <div
+          style={{
+            marginBottom: "24px",
+            paddingBottom: "16px",
+            borderBottom: "1px solid #e5e7eb",
+          }}
+        >
+          <h1
+            style={{
+              fontSize: "24px",
+              fontWeight: "bold",
+              color: "#111827",
+              margin: 0,
+            }}
+          >
+            {checklist.title}
           </h1>
-          <p className="text-gray-600">{checklist.title}</p>
-        </div>
-
-        <div className="bg-gray-50 border border-gray-200 rounded-lg p-6 mb-6">
-          <p className="text-sm text-gray-600 mb-2">
-            Share this link with your manager:
-          </p>
-          <p className="font-mono text-sm bg-white border border-gray-300 rounded px-3 py-2 break-all">
-            localhost:3000/c/{checklist.share_code}
+          <p style={{ fontSize: "14px", color: "#6b7280", marginTop: "4px" }}>
+            Today&apos;s checklist · {tasks?.length ?? 0} tasks
           </p>
         </div>
 
-        <p className="text-sm text-gray-500 text-center">
-          Tasks and tick interface coming next.
-        </p>
+        <TaskList tasks={tasks ?? []} completedTaskIds={completedTaskIds} />
       </div>
     </main>
   );
