@@ -8,9 +8,13 @@ function extractTextFromPDF(buffer: Buffer): Promise<string> {
   return new Promise((resolve, reject) => {
     const pdfParser = new PDFParser(null, true);
 
-    pdfParser.on("pdfParser_dataError", (errData: { parserError: Error }) => {
-      reject(errData.parserError);
-    });
+    pdfParser.on(
+      "pdfParser_dataError",
+      (errMsg: Error | { parserError: Error }) => {
+        const error = "parserError" in errMsg ? errMsg.parserError : errMsg;
+        reject(error);
+      },
+    );
 
     pdfParser.on("pdfParser_dataReady", () => {
       const text = (
